@@ -51,17 +51,17 @@ class Iseed
 
     /**
      * Generates a seed file.
-     * @param  string   $table
-     * @param  string   $prefix
-     * @param  string   $suffix
-     * @param  string   $database
-     * @param  int      $max
-     * @param  string   $prerunEvent
-     * @param  string   $postunEvent
+     * @param string $table
+     * @param string $prefix
+     * @param string $suffix
+     * @param string $database
+     * @param int $max
+     * @param string $prerunEvent
+     * @param string $postunEvent
      * @return bool
      * @throws Orangehill\Iseed\TableNotFoundException
      */
-    public function generateSeed($table, $prefix=null, $suffix=null, $database = null, $max = 0, $chunkSize = 0, $exclude = null, $prerunEvent = null, $postrunEvent = null, $dumpAuto = true, $indexed = true, $orderBy = null, $direction = 'ASC')
+    public function generateSeed($table, $prefix = null, $suffix = null, $database = null, $max = 0, $chunkSize = 0, $exclude = null, $prerunEvent = null, $postrunEvent = null, $dumpAuto = true, $indexed = true, $orderBy = null, $direction = 'ASC')
     {
         if (!$database) {
             $database = config('database.default');
@@ -76,44 +76,69 @@ class Iseed
 
         // Get the data
         $data = $this->getData($table, $max, $exclude, $orderBy, $direction);
-
-        // Repack the data
-        $dataArray = $this->repackSeedData($data);
-
-        // Generate class name
-        $className = $this->generateClassName($table, $prefix, $suffix);
-
+        $maxRows = config('iseed::config.max_rows_per_file');
         // Get template for a seed file contents
         $stub = $this->readStubFile($this->getStubPath() . '/seed.stub');
-
         // Get a seed folder path
         $seedPath = $this->getSeedPath();
+        if (count($data) < maxRows) {
+            // Repack the data
+            $dataArray = $this->repackSeedData($data);
 
-        // Get a app/database/seeds path
-        $seedsPath = $this->getPath($className, $seedPath);
+            // Generate class name
+            $className = $this->generateClassName($table, $prefix, $suffix);
 
-        // Get a populated stub file
-        $seedContent = $this->populateStub(
-            $className,
-            $stub,
-            $table,
-            $dataArray,
-            $chunkSize,
-            $prerunEvent,
-            $postrunEvent,
-            $indexed
-        );
 
-        // Save a populated stub
-        $this->files->put($seedsPath, $seedContent);
 
-        // Run composer dump-auto
+
+
+            // Get a app/database/seeds path
+            $seedsPath = $this->getPath($className, $seedPath);
+
+            // Get a populated stub file
+            $seedContent = $this->populateStub(
+                $className,
+                $stub,
+                $table,
+                $dataArray,
+                $chunkSize,
+                $prerunEvent,
+                $postrunEvent,
+                $indexed
+            );
+
+            // Save a populated stub
+            $this->files->put($seedsPath, $seedContent);
+
+            // Run composer dump-auto
+            $this->updateDatabaseSeederRunMethod($className);
+        } else {
+            // Generate class name
+            $className = $this->generateClassName($table, $prefix, $suffix);
+
+            //Divide the data into chunks
+            $chunks = array_chunk($data, $maxRows);
+            for ($i = 0; $i < count($chunks); $i++) {
+                $dataArray = $this->repackSeedData($chunks[$i]);
+                $seedContent = $this->populateStub(
+                    $className,
+                    $stub,
+                    $table,
+                    $dataArray,
+                    $chunkSize,
+                    $prerunEvent,
+                    $postrunEvent,
+                    $indexed
+                );
+                $this->files->put($seedPath . '/' . $className . '_' . $i . '.php', $seedContent);
+                $this->updateDatabaseSeederRunMethod($className);
+            }
+        }
         if ($dumpAuto) {
             $this->composer->dumpAutoloads();
         }
 
-        // Update the DatabaseSeeder.php file
-        return $this->updateDatabaseSeederRunMethod($className) !== false;
+        return true;
     }
 
     /**
@@ -127,7 +152,7 @@ class Iseed
 
     /**
      * Get the Data
-     * @param  string $table
+     * @param string $table
      * @return Array
      */
     public function getData($table, $max, $exclude = null, $orderBy = null, $direction = 'ASC')
@@ -139,7 +164,7 @@ class Iseed
             $result = $result->select(array_diff($allColumns, $exclude));
         }
 
-        if($orderBy) {
+        if ($orderBy) {
             $result = $result->orderBy($orderBy, $direction);
         }
 
@@ -152,7 +177,7 @@ class Iseed
 
     /**
      * Repacks data read from the database
-     * @param  array|object $data
+     * @param array|object $data
      * @return array
      */
     public function repackSeedData($data)
@@ -185,12 +210,12 @@ class Iseed
 
     /**
      * Generates a seed class name (also used as a filename)
-     * @param  string  $table
-     * @param  string  $prefix
-     * @param  string  $suffix
+     * @param string $table
+     * @param string $prefix
+     * @param string $suffix
      * @return string
      */
-    public function generateClassName($table, $prefix=null, $suffix=null)
+    public function generateClassName($table, $prefix = null, $suffix = null)
     {
         $tableString = '';
         $tableName = explode('_', $table);
@@ -211,13 +236,13 @@ class Iseed
 
     /**
      * Populate the place-holders in the seed stub.
-     * @param  string   $class
-     * @param  string   $stub
-     * @param  string   $table
-     * @param  string   $data
-     * @param  int      $chunkSize
-     * @param  string   $prerunEvent
-     * @param  string   $postunEvent
+     * @param string $class
+     * @param string $stub
+     * @param string $table
+     * @param string $data
+     * @param int $chunkSize
+     * @param string $prerunEvent
+     * @param string $postunEvent
      * @return string
      */
     public function populateStub($class, $stub, $table, $data, $chunkSize = null, $prerunEvent = null, $postrunEvent = null, $indexed = true)
@@ -285,8 +310,8 @@ class Iseed
 
     /**
      * Create the full path name to the seed file.
-     * @param  string  $name
-     * @param  string  $path
+     * @param string $name
+     * @param string $path
      * @return string
      */
     public function getPath($name, $path)
@@ -296,7 +321,7 @@ class Iseed
 
     /**
      * Prettify a var_export of an array
-     * @param  array  $array
+     * @param array $array
      * @return string
      */
     protected function prettifyArray($array, $indexed = true)
@@ -328,8 +353,7 @@ class Iseed
                 //skip character right after an escape \
                 if ($lines[$i][$j] == '\\') {
                     $j++;
-                }
-                //check string open/end
+                } //check string open/end
                 else if ($lines[$i][$j] == '\'') {
                     $inString = !$inString;
                 }
@@ -349,8 +373,8 @@ class Iseed
     /**
      * Adds new lines to the passed content variable reference.
      *
-     * @param string    $content
-     * @param int       $numberOfLines
+     * @param string $content
+     * @param int $numberOfLines
      */
     private function addNewLines(&$content, $numberOfLines = 1)
     {
@@ -363,8 +387,8 @@ class Iseed
     /**
      * Adds indentation to the passed content reference.
      *
-     * @param string    $content
-     * @param int       $numberOfIndents
+     * @param string $content
+     * @param int $numberOfIndents
      */
     private function addIndent(&$content, $numberOfIndents = 1)
     {
@@ -392,7 +416,7 @@ class Iseed
 
     /**
      * Updates the DatabaseSeeder file's run method (kudoz to: https://github.com/JeffreyWay/Laravel-4-Generators)
-     * @param  string  $className
+     * @param string $className
      * @return bool
      */
     public function updateDatabaseSeederRunMethod($className)
